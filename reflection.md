@@ -58,13 +58,20 @@
 
 **a. What you tested**
 
-- What behaviors did you test?
-- Why were these tests important?
+- **Task lifecycle**: mark_complete/mark_incomplete toggling, recurring task generation for daily/weekly/as_needed frequencies, attribute preservation across recurrence.
+- **Pet task management**: add/remove tasks, pending_tasks filter, mark_task_complete with auto-recurrence and without (as_needed), completing nonexistent or already-done tasks.
+- **Scheduler core**: priority ordering (high before medium before low), time budget enforcement, completed task exclusion, empty input handling.
+- **Sorting**: chronological ordering by HH:MM, untimed tasks pushed to end.
+- **Filtering**: by pet name (including missing pet), by completion status, by category.
+- **Conflict detection**: same-pet conflicts, cross-pet conflicts, no false positives on different times, completed tasks correctly excluded.
+- **Edge cases**: zero budget, all tasks completed, single oversized task, owner with no pets, pet with no tasks, mixed empty/full pets.
+
+These tests matter because they verify both happy paths and boundary conditions — the scheduler must never crash on unexpected input, and its algorithmic decisions (priority ordering, greedy fit, conflict warnings) must be deterministic and correct.
 
 **b. Confidence**
 
-- How confident are you that your scheduler works correctly?
-- What edge cases would you test next if you had more time?
+- **4 out of 5.** The 35 tests cover the core logic thoroughly — scheduling, sorting, filtering, conflict detection, and recurring tasks all behave as designed.
+- If I had more time, I would test: (1) duration-based time overlap (not just exact-time conflicts), (2) Streamlit UI integration (button clicks triggering correct backend calls), (3) large-scale stress tests (100+ tasks to verify performance), and (4) property-based tests with Hypothesis to find unexpected input combinations.
 
 ---
 

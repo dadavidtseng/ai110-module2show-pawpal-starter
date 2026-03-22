@@ -32,6 +32,28 @@ PawPal+ includes several algorithmic features beyond basic task listing:
 - **Conflict detection** — Warns when two or more pending tasks (same pet or across pets) share the same scheduled time.
 - **Recurring tasks** — Daily and weekly tasks automatically generate their next occurrence when marked complete, using `timedelta` for accurate date math.
 
+## Testing PawPal+
+
+Run the test suite:
+
+```bash
+python -m pytest tests/ -v
+```
+
+The suite covers **35 tests** across 7 test classes:
+
+| Class | What it tests |
+|---|---|
+| `TestTask` | Completion toggling, recurring task generation (daily/weekly/as_needed) |
+| `TestPet` | Add/remove tasks, pending filter, mark_task_complete with auto-recurrence |
+| `TestScheduler` | Priority ordering, time budget, completed skipping, empty schedule, explain output |
+| `TestSortByTime` | Chronological sorting, untimed tasks placed last |
+| `TestFiltering` | Filter by pet, status, category; missing pet returns empty |
+| `TestConflictDetection` | Same-pet conflict, cross-pet conflict, no false positives, completed tasks ignored |
+| `TestEdgeCases` | Zero budget, all completed, oversized task, no pets, no tasks, nonexistent title |
+
+**Confidence Level: 4/5** — Core scheduling, filtering, and conflict logic are well-tested. The main gaps are UI integration tests (Streamlit) and duration-based overlap detection, which was intentionally deferred.
+
 ## Getting started
 
 ### Setup
