@@ -11,12 +11,22 @@ from dataclasses import dataclass, field
 
 @dataclass
 class Task:
-    """A single pet care activity."""
+    """A single pet care activity (walk, feeding, meds, grooming, etc.)."""
 
     title: str
     duration_minutes: int
     priority: str = "medium"  # "low", "medium", "high"
     category: str = "general"  # walk, feeding, meds, grooming, enrichment, general
+    frequency: str = "daily"  # daily, weekly, as_needed
+    completed: bool = False
+
+    def mark_complete(self) -> None:
+        """Mark this task as completed."""
+        self.completed = True
+
+    def mark_incomplete(self) -> None:
+        """Reset this task to incomplete."""
+        self.completed = False
 
 
 @dataclass
@@ -36,6 +46,10 @@ class Pet:
         """Remove a task by title."""
         self.tasks = [t for t in self.tasks if t.title != title]
 
+    def pending_tasks(self) -> list[Task]:
+        """Return only tasks that are not yet completed."""
+        return [t for t in self.tasks if not t.completed]
+
 
 @dataclass
 class Owner:
@@ -53,6 +67,10 @@ class Owner:
         """Gather every task across all pets."""
         return [task for pet in self.pets for task in pet.tasks]
 
+    def get_pending_tasks(self) -> list[Task]:
+        """Gather only incomplete tasks across all pets."""
+        return [task for pet in self.pets for task in pet.pending_tasks()]
+
 
 # ---------------------------------------------------------------------------
 # Scheduling
@@ -67,18 +85,26 @@ class Schedule:
 
     tasks: list[Task] = field(default_factory=list)
     total_minutes: int = 0
+    available_minutes: int = 0
 
     def explain(self) -> str:
         """Return a human-readable explanation of the schedule."""
         if not self.tasks:
-            return "No tasks scheduled."
+            return "No tasks scheduled — nothing to do today!"
 
-        lines = [f"Daily plan ({self.total_minutes} min total):\n"]
+        lines = [
+            f"Daily plan ({self.total_minutes} min used "
+            f"of {self.available_minutes} min available):\n"
+        ]
         for i, task in enumerate(self.tasks, 1):
             lines.append(
                 f"  {i}. {task.title} — {task.duration_minutes} min "
                 f"[{task.priority} priority, {task.category}]"
             )
+
+        remaining = self.available_minutes - self.total_minutes
+        if remaining > 0:
+            lines.append(f"\n  Free time remaining: {remaining} min")
         return "\n".join(lines)
 
 
@@ -90,23 +116,36 @@ class Scheduler:
         """Build an optimised daily plan.
 
         Strategy:
-        1. Collect all tasks from all pets.
-        2. Sort by priority (high → medium → low).
+        1. Collect all pending (incomplete) tasks from all pets.
+        2. Sort by priority (high -> medium -> low).
         3. Greedily fit tasks into the available time budget.
         """
-        # TODO: implement scheduling logic
-        pass
+        pending = owner.get_pending_tasks()
+        prioritized = Scheduler._prioritize(pending)
+        selected = Scheduler._fit_to_time(prioritized, owner.available_minutes)
+        total = sum(t.duration_minutes for t in selected)
 
-    # -- private helpers -----------------------------------------------------
+        return Schedule(
+            tasks=selected,
+            total_minutes=total,
+            available_minutes=owner.available_minutes,
+        )
 
     @staticmethod
     def _prioritize(tasks: list[Task]) -> list[Task]:
-        """Sort tasks by priority (high first)."""
-        # TODO: implement
-        pass
+        """Sort tasks by priority (high first), then by duration (shorter first)."""
+        return sorted(
+            tasks,
+            key=lambda t: (PRIORITY_ORDER.get(t.priority, 1), t.duration_minutes),
+        )
 
     @staticmethod
     def _fit_to_time(tasks: list[Task], available_minutes: int) -> list[Task]:
-        """Select tasks that fit within the time budget."""
-        # TODO: implement
-        pass
+        """Greedily select tasks that fit within the time budget."""
+        selected: list[Task] = []
+        remaining = available_minutes
+        for task in tasks:
+            if task.duration_minutes <= remaining:
+                selected.append(task)
+                remaining -= task.duration_minutes
+        return selected
