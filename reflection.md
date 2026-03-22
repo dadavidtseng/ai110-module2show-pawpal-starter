@@ -44,13 +44,17 @@
 
 **a. How you used AI**
 
-- How did you use AI tools during this project (for example: design brainstorming, debugging, refactoring)?
-- What kinds of prompts or questions were most helpful?
+- **Design brainstorming** — Used AI to validate class relationships from the UML diagram, confirm whether a separate `Schedule` dataclass was justified, and check for missing edges (e.g., pet-task back-reference).
+- **Code generation** — AI generated class skeletons from the UML description, implemented the greedy scheduling algorithm, and scaffolded the Streamlit UI layout.
+- **Test generation** — AI proposed test classes and edge cases (zero budget, cross-pet conflicts, recurring attribute preservation) that I reviewed and kept.
+- **Refactoring** — Asked AI to simplify the `sort_by_time` lambda and consolidate filtering methods into the `Scheduler` class rather than scattering them.
+- **Most helpful prompts**: "Based on my skeletons, how should the Scheduler retrieve tasks from the Owner?", "What edge cases should I test for a scheduler with recurring tasks?", and "How can I use `timedelta` for daily recurrence?"
 
 **b. Judgment and verification**
 
-- Describe one moment where you did not accept an AI suggestion as-is.
-- How did you evaluate or verify what the AI suggested?
+- AI initially suggested making `Scheduler` an instance class that stores a reference to `Owner`. I rejected this because it creates unnecessary coupling — the Scheduler doesn't need mutable state, and static methods are easier to test. I kept the stateless design.
+- I verified AI-generated test assertions by manually tracing expected values (e.g., confirming that `date.today() + timedelta(days=1)` is correct for daily recurrence rather than blindly trusting the assertion).
+- When AI suggested a complex regex-based time parser for `sort_by_time`, I replaced it with a simpler `split(":")` approach — KISS over cleverness.
 
 ---
 
@@ -79,12 +83,16 @@ These tests matter because they verify both happy paths and boundary conditions 
 
 **a. What went well**
 
-- What part of this project are you most satisfied with?
+- The **stateless Scheduler design** (static methods only) made testing trivial — no setup/teardown, no mock objects, just pass data in and assert outputs. This was the single best architectural decision.
+- The **dataclass-first approach** kept the domain models clean and readable. Adding new fields (scheduled_time, due_date) later was painless because dataclasses handle defaults and `__init__` automatically.
+- The **CLI-first workflow** (main.py before Streamlit) caught logic bugs early, before UI complexity muddied the feedback loop.
 
 **b. What you would improve**
 
-- If you had another iteration, what would you improve or redesign?
+- **Duration-based conflict detection** — Currently only checks exact time matches. Overlapping intervals (e.g., a 30-min task at 08:00 conflicts with anything at 08:15) would be more realistic.
+- **Pet-task association in Schedule** — The schedule output doesn't show which pet each task belongs to. Adding a `pet_name` field to Task or a mapping in Schedule would make the UI more informative.
+- **Persistent storage** — All data lives in session state and is lost on refresh. Adding SQLite or JSON file persistence would make the app practical.
 
 **c. Key takeaway**
 
-- What is one important thing you learned about designing systems or working with AI on this project?
+- **AI is a powerful accelerator, but the human is the architect.** AI can generate code faster than I can type, but it doesn't understand system-level tradeoffs — when to defer a feature (YAGNI), when simplicity beats correctness (exact-time vs. interval overlap), or when a "clever" solution hurts readability. The most valuable skill is knowing when to accept, modify, or reject AI suggestions based on the project's actual needs.
