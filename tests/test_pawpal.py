@@ -2,7 +2,7 @@
 
 from datetime import date, timedelta
 
-from pawpal_system import Owner, Pet, Task, Scheduler
+from pawpal_system import Owner, Pet, Task, Scheduler, Schedule
 
 
 # ---------------------------------------------------------------------------
@@ -265,3 +265,91 @@ class TestConflictDetection:
         owner.add_pet(pet)
 
         assert Scheduler.detect_conflicts(owner) == []
+
+
+# ---------------------------------------------------------------------------
+# Edge-case tests
+# ---------------------------------------------------------------------------
+
+class TestEdgeCases:
+    """Edge cases for robustness."""
+
+    def test_zero_budget_schedules_nothing(self):
+        owner = Owner("Busy", available_minutes=0)
+        pet = Pet("Buddy")
+        pet.add_task(Task("Walk", 30, priority="high"))
+        owner.add_pet(pet)
+        schedule = Scheduler.generate_schedule(owner)
+        assert schedule.tasks == []
+        assert schedule.total_minutes == 0
+
+    def test_all_tasks_completed_gives_empty_schedule(self):
+        owner = Owner("Done", available_minutes=120)
+        pet = Pet("Buddy")
+        t = Task("Walk", 30)
+        t.mark_complete()
+        pet.add_task(t)
+        owner.add_pet(pet)
+        schedule = Scheduler.generate_schedule(owner)
+        assert schedule.tasks == []
+
+    def test_single_task_exceeds_budget_skipped(self):
+        owner = Owner("Short", available_minutes=10)
+        pet = Pet("Buddy")
+        pet.add_task(Task("Long Walk", 60, priority="high"))
+        owner.add_pet(pet)
+        schedule = Scheduler.generate_schedule(owner)
+        assert schedule.tasks == []
+
+    def test_pet_with_no_tasks_no_crash(self):
+        owner = Owner("New")
+        owner.add_pet(Pet("Buddy"))
+        schedule = Scheduler.generate_schedule(owner)
+        assert schedule.tasks == []
+        assert Scheduler.detect_conflicts(owner) == []
+
+    def test_owner_with_no_pets(self):
+        owner = Owner("Solo", available_minutes=60)
+        schedule = Scheduler.generate_schedule(owner)
+        assert schedule.tasks == []
+
+    def test_empty_schedule_explain_message(self):
+        schedule = Schedule()
+        msg = schedule.explain()
+        assert "nothing to do" in msg.lower()
+
+    def test_recurring_task_preserves_attributes(self):
+        task = Task(
+            "Walk", 30, priority="high", category="walk",
+            frequency="daily", scheduled_time="07:00", due_date=date.today(),
+        )
+        nxt = task.next_occurrence()
+        assert nxt is not None
+        assert nxt.priority == "high"
+        assert nxt.category == "walk"
+        assert nxt.scheduled_time == "07:00"
+        assert nxt.frequency == "daily"
+
+    def test_mark_task_complete_nonexistent_returns_none(self):
+        pet = Pet("Buddy")
+        pet.add_task(Task("Walk", 30))
+        result = pet.mark_task_complete("Nonexistent")
+        assert result is None
+
+    def test_mark_task_complete_already_done_returns_none(self):
+        pet = Pet("Buddy")
+        t = Task("Walk", 30, frequency="daily", due_date=date.today())
+        t.mark_complete()
+        pet.add_task(t)
+        result = pet.mark_task_complete("Walk")
+        assert result is None
+
+    def test_multiple_pets_mixed_empty_and_full(self):
+        owner = Owner("Mix", available_minutes=60)
+        empty_pet = Pet("Ghost")
+        full_pet = Pet("Buddy")
+        full_pet.add_task(Task("Walk", 30, priority="high"))
+        owner.add_pet(empty_pet)
+        owner.add_pet(full_pet)
+        schedule = Scheduler.generate_schedule(owner)
+        assert len(schedule.tasks) == 1
