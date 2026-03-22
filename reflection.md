@@ -28,13 +28,15 @@
 
 **a. Constraints and priorities**
 
-- What constraints does your scheduler consider (for example: time, priority, preferences)?
-- How did you decide which constraints mattered most?
+- The scheduler considers **time budget** (owner's available minutes per day) and **task priority** (high > medium > low).
+- Within the same priority tier, shorter tasks are preferred — this maximises the number of tasks that fit within the budget.
+- Priority was chosen as the primary constraint because missing a high-priority task (e.g., medication) has real consequences, while skipping enrichment is merely disappointing.
 
 **b. Tradeoffs**
 
-- Describe one tradeoff your scheduler makes.
-- Why is that tradeoff reasonable for this scenario?
+- **Conflict detection uses exact-time matching only**, not duration-based overlap. Two tasks at "08:00" and "08:15" won't trigger a warning even if the first task runs 30 minutes. This was a deliberate simplicity tradeoff — implementing proper interval overlap requires tracking start+end times, which adds complexity without clear benefit for a daily planner where most tasks are approximate.
+- **Greedy scheduling is not optimal.** A knapsack algorithm could theoretically pack more value into the time budget, but the greedy approach is easier to understand, debug, and explain to users. For a pet care app with ~10 tasks, the difference is negligible.
+- **Recurring task regeneration is eager** — a new occurrence is created immediately when the current one is completed, rather than at the start of each day. This keeps the logic stateless (no background scheduler needed) but means the task list grows over time.
 
 ---
 
