@@ -4,13 +4,23 @@
 
 **a. Initial design**
 
-- Briefly describe your initial UML design.
-- What classes did you include, and what responsibilities did you assign to each?
+**Core user actions identified:**
+1. **Add/manage pets** — Enter pet info (name, species, age) linked to an owner profile
+2. **Add/edit care tasks** — Create tasks with duration, priority, and category (walk, feeding, meds, grooming, enrichment)
+3. **Generate a daily schedule** — Produce an optimized daily plan that respects time constraints and task priorities, with reasoning explanations
+
+**Classes and responsibilities:**
+- **Owner** — Holds owner name and available minutes per day; owns a list of Pets
+- **Pet** — Stores pet name, species, and age; holds a list of Tasks specific to that pet
+- **Task** — Represents a single care activity with title, duration, priority, and category
+- **Scheduler** — Takes an Owner (with Pets/Tasks) and available time, then produces a Schedule sorted by priority and fitted within time constraints
+- **Schedule** — Holds the ordered list of scheduled tasks and provides explanation/reasoning for the plan
 
 **b. Design changes**
 
-- Did your design change during implementation?
-- If yes, describe at least one change and why you made it.
+- After reviewing the skeleton with AI, the initial design held up well — no structural changes were needed at this stage.
+- One consideration was whether `Schedule` should track which pet each task belongs to (for richer explanations). I deferred this per YAGNI — the current design keeps things simple, and we can add pet-task association later if the UI requires it.
+- The `Scheduler` was kept stateless (static methods only) to make it easy to test without instantiation overhead.
 
 ---
 
