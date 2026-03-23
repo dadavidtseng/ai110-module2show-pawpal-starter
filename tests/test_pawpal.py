@@ -1,6 +1,7 @@
 """Tests for PawPal+ core logic."""
 
 from datetime import date, timedelta
+from pathlib import Path
 
 from pawpal_system import Owner, Pet, Task, Scheduler, Schedule
 
@@ -353,3 +354,111 @@ class TestEdgeCases:
         owner.add_pet(full_pet)
         schedule = Scheduler.generate_schedule(owner)
         assert len(schedule.tasks) == 1
+
+
+# ---------------------------------------------------------------------------
+# Next available slot tests
+# ---------------------------------------------------------------------------
+
+class TestFindNextSlot:
+    """Tests for next-available-slot algorithm."""
+
+    def test_finds_first_free_slot(self):
+        owner = Owner("Test")
+        pet = Pet("Buddy")
+        pet.add_task(Task("Walk", 30, scheduled_time="07:00"))
+        owner.add_pet(pet)
+        slot = Scheduler.find_next_slot(owner, 30)
+        assert slot == "07:15"  # 07:00 is taken
+
+    def test_returns_start_when_empty(self):
+        owner = Owner("Test")
+        owner.add_pet(Pet("Buddy"))
+        slot = Scheduler.find_next_slot(owner, 30)
+        assert slot == "07:00"
+
+    def test_respects_start_hour(self):
+        owner = Owner("Test")
+        owner.add_pet(Pet("Buddy"))
+        slot = Scheduler.find_next_slot(owner, 30, start_hour=9)
+        assert slot == "09:00"
+
+
+# ---------------------------------------------------------------------------
+# Weighted scoring tests
+# ---------------------------------------------------------------------------
+
+class TestWeightedScheduling:
+    """Tests for weighted priority scoring."""
+
+    def test_high_priority_scores_higher(self):
+        high = Task("Walk", 30, priority="high")
+        low = Task("Play", 30, priority="low")
+        assert Scheduler.weighted_score(high) > Scheduler.weighted_score(low)
+
+    def test_recurring_bonus(self):
+        daily = Task("Walk", 30, priority="medium", frequency="daily")
+        once = Task("Bath", 30, priority="medium", frequency="as_needed")
+        assert Scheduler.weighted_score(daily) > Scheduler.weighted_score(once)
+
+    def test_shorter_task_scores_higher_same_priority(self):
+        short = Task("Feed", 5, priority="high")
+        long = Task("Walk", 60, priority="high")
+        assert Scheduler.weighted_score(short) > Scheduler.weighted_score(long)
+
+    def test_weighted_schedule_respects_budget(self):
+        owner = Owner("Test", available_minutes=40)
+        pet = Pet("Buddy")
+        pet.add_task(Task("Walk", 30, priority="high"))
+        pet.add_task(Task("Feed", 10, priority="high"))
+        pet.add_task(Task("Play", 25, priority="low"))
+        owner.add_pet(pet)
+        schedule = Scheduler.generate_weighted_schedule(owner)
+        assert schedule.total_minutes <= 40
+
+
+# ---------------------------------------------------------------------------
+# JSON persistence tests
+# ---------------------------------------------------------------------------
+
+class TestPersistence:
+    """Tests for save/load JSON round-trip."""
+
+    def test_task_round_trip(self):
+        task = Task("Walk", 30, priority="high", category="walk",
+                    frequency="daily", scheduled_time="07:00", due_date=date.today())
+        restored = Task.from_dict(task.to_dict())
+        assert restored.title == task.title
+        assert restored.due_date == task.due_date
+        assert restored.scheduled_time == task.scheduled_time
+
+    def test_owner_round_trip(self):
+        owner = Owner("Test", available_minutes=90)
+        pet = Pet("Buddy", species="dog", age=3)
+        pet.add_task(Task("Walk", 30, priority="high", due_date=date.today()))
+        owner.add_pet(pet)
+
+        data = owner.to_dict()
+        restored = Owner.from_dict(data)
+        assert restored.name == "Test"
+        assert len(restored.pets) == 1
+        assert restored.pets[0].name == "Buddy"
+        assert len(restored.pets[0].tasks) == 1
+
+    def test_save_and_load_file(self, tmp_path: Path):
+        owner = Owner("Test", available_minutes=60)
+        pet = Pet("Mochi")
+        pet.add_task(Task("Feed", 10))
+        owner.add_pet(pet)
+
+        path = tmp_path / "test_data.json"
+        owner.save_to_json(path)
+        loaded = Owner.load_from_json(path)
+        assert loaded is not None
+        assert loaded.name == "Test"
+        assert len(loaded.pets) == 1
+        assert loaded.pets[0].tasks[0].title == "Feed"
+
+    def test_load_nonexistent_returns_none(self, tmp_path: Path):
+        result = Owner.load_from_json(tmp_path / "nope.json")
+        assert result is None
