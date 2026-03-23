@@ -74,8 +74,8 @@ These tests matter because they verify both happy paths and boundary conditions 
 
 **b. Confidence**
 
-- **4 out of 5.** The 35 tests cover the core logic thoroughly — scheduling, sorting, filtering, conflict detection, and recurring tasks all behave as designed.
-- If I had more time, I would test: (1) duration-based time overlap (not just exact-time conflicts), (2) Streamlit UI integration (button clicks triggering correct backend calls), (3) large-scale stress tests (100+ tasks to verify performance), and (4) property-based tests with Hypothesis to find unexpected input combinations.
+- **5 out of 5.** The 46 tests cover core logic and all extensions — scheduling, sorting, filtering, conflict detection, recurring tasks, weighted scoring, next-slot finding, and JSON persistence.
+- Remaining gaps are UI integration tests (Streamlit) and duration-based overlap detection, both deferred by design.
 
 ---
 
@@ -86,13 +86,37 @@ These tests matter because they verify both happy paths and boundary conditions 
 - The **stateless Scheduler design** (static methods only) made testing trivial — no setup/teardown, no mock objects, just pass data in and assert outputs. This was the single best architectural decision.
 - The **dataclass-first approach** kept the domain models clean and readable. Adding new fields (scheduled_time, due_date) later was painless because dataclasses handle defaults and `__init__` automatically.
 - The **CLI-first workflow** (main.py before Streamlit) caught logic bugs early, before UI complexity muddied the feedback loop.
+- Adding **to_dict/from_dict** methods to each dataclass made JSON persistence a one-liner on Owner — clean separation of serialisation from business logic.
 
 **b. What you would improve**
 
 - **Duration-based conflict detection** — Currently only checks exact time matches. Overlapping intervals (e.g., a 30-min task at 08:00 conflicts with anything at 08:15) would be more realistic.
 - **Pet-task association in Schedule** — The schedule output doesn't show which pet each task belongs to. Adding a `pet_name` field to Task or a mapping in Schedule would make the UI more informative.
-- **Persistent storage** — All data lives in session state and is lost on refresh. Adding SQLite or JSON file persistence would make the app practical.
+- **Undo/history** — Once a task is marked complete, there's no undo. A command pattern or event log would make the system more forgiving.
 
 **c. Key takeaway**
 
 - **AI is a powerful accelerator, but the human is the architect.** AI can generate code faster than I can type, but it doesn't understand system-level tradeoffs — when to defer a feature (YAGNI), when simplicity beats correctness (exact-time vs. interval overlap), or when a "clever" solution hurts readability. The most valuable skill is knowing when to accept, modify, or reject AI suggestions based on the project's actual needs.
+
+---
+
+## 6. Optional Extensions
+
+**a. Advanced algorithmic capability (Challenge 1)**
+
+- Added `Scheduler.find_next_slot()` — scans 07:00–21:00 in 15-minute increments, returns the first slot not occupied by any pending task. Exposed in the UI as a "Suggest time" button.
+- Added `Scheduler.weighted_score()` and `generate_weighted_schedule()` — a composite score combining priority weight (high=3, medium=2, low=1), duration efficiency (shorter = higher), and a recurrence bonus (+0.2 for daily/weekly). The UI has a toggle to switch between simple priority and weighted ranking.
+
+**b. Data persistence (Challenge 2)**
+
+- Added `to_dict()`/`from_dict()` on Task, Pet, and Owner for clean serialisation without external libraries.
+- `Owner.save_to_json()` and `Owner.load_from_json()` persist the full object graph to `data.json`.
+- The Streamlit app auto-loads on startup and auto-saves on every mutation (add pet, add task, complete task).
+
+**c. Professional UI formatting (Challenges 3 & 4)**
+
+- Category emojis: 🚶 walk, 🍽️ feeding, 💊 meds, ✂️ grooming, 🎾 enrichment, 📋 general
+- Priority indicators: 🔴 high, 🟡 medium, 🟢 low
+- Species icons in the sidebar: 🐕 dog, 🐈 cat, 🐦 bird, 🐇 rabbit
+- Weighted score displayed per task in the task list
+- CLI demo uses the same emoji system with UTF-8 forced output on Windows
