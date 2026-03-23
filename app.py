@@ -3,8 +3,12 @@
 import streamlit as st
 from datetime import date
 
-from pawpal_system import Owner, Pet, Task, Scheduler
+from pawpal_system import (
+    Owner, Pet, Task, Scheduler,
+    CATEGORY_EMOJI, PRIORITY_INDICATOR,
+)
 
+DATA_FILE = "data.json"
 
 # ---------------------------------------------------------------------------
 # Page config
@@ -14,16 +18,29 @@ st.set_page_config(page_title="PawPal+", page_icon="🐾", layout="centered")
 
 
 # ---------------------------------------------------------------------------
-# Session state initialisation
+# Session state initialisation (with persistence)
 # ---------------------------------------------------------------------------
 
-if "owner" not in st.session_state:
-    st.session_state.owner = Owner(name="Jordan", available_minutes=90)
+def _load_state() -> None:
+    """Load owner from JSON on first run, or create a fresh owner."""
+    loaded = Owner.load_from_json(DATA_FILE)
+    if loaded:
+        st.session_state.owner = loaded
+        st.session_state.pets = {pet.name: pet for pet in loaded.pets}
+    else:
+        st.session_state.owner = Owner(name="Jordan", available_minutes=90)
+        st.session_state.pets = {}
 
-if "pets" not in st.session_state:
-    st.session_state.pets = {}  # name -> Pet
+
+if "owner" not in st.session_state:
+    _load_state()
 
 owner: Owner = st.session_state.owner
+
+
+def _save() -> None:
+    """Persist current state to JSON."""
+    owner.save_to_json(DATA_FILE)
 
 
 # ---------------------------------------------------------------------------
@@ -55,6 +72,7 @@ with st.sidebar:
             new_pet = Pet(name=pet_name, species=pet_species, age=pet_age)
             st.session_state.pets[pet_name] = new_pet
             owner.add_pet(new_pet)
+            _save()
             st.success(f"Added {pet_name} the {pet_species}!")
         elif pet_name in st.session_state.pets:
             st.warning(f"A pet named '{pet_name}' already exists.")
@@ -67,7 +85,11 @@ with st.sidebar:
         for pname, pet in st.session_state.pets.items():
             task_count = len(pet.tasks)
             pending = len(pet.pending_tasks())
-            st.markdown(f"**{pname}** ({pet.species}, age {pet.age}) — {pending}/{task_count} tasks pending")
+            species_emoji = {"dog": "🐕", "cat": "🐈", "bird": "🐦", "rabbit": "🐇"}.get(pet.species, "🐾")
+            st.markdown(f"{species_emoji} **{pname}** (age {pet.age}) — {pending}/{task_count} tasks pending")
+
+    st.divider()
+    st.caption("Data auto-saved to `data.json`")
 
 
 # ---------------------------------------------------------------------------
@@ -84,16 +106,32 @@ col1, col2 = st.columns(2)
 with col1:
     selected_pet = st.selectbox("For pet", list(st.session_state.pets.keys()))
     task_title = st.text_input("Task title", value="Morning walk")
-    task_category = st.selectbox("Category", ["walk", "feeding", "meds", "grooming", "enrichment", "general"])
+    task_category = st.selectbox(
+        "Category",
+        ["walk", "feeding", "meds", "grooming", "enrichment", "general"],
+        format_func=lambda c: f"{CATEGORY_EMOJI.get(c, '')} {c}",
+    )
 
 with col2:
     task_time = st.time_input("Scheduled time", value=None)
     task_duration = st.number_input("Duration (min)", min_value=1, max_value=240, value=20)
-    task_priority = st.selectbox("Priority", ["high", "medium", "low"])
+    task_priority = st.selectbox(
+        "Priority",
+        ["high", "medium", "low"],
+        format_func=lambda p: f"{PRIORITY_INDICATOR.get(p, '')} {p}",
+    )
 
-col_freq, col_add = st.columns([1, 1])
+col_freq, col_slot, col_add = st.columns([1, 1, 1])
 with col_freq:
     task_frequency = st.selectbox("Frequency", ["daily", "weekly", "as_needed"])
+with col_slot:
+    st.markdown("<br>", unsafe_allow_html=True)
+    if st.button("Suggest time", use_container_width=True):
+        slot = Scheduler.find_next_slot(owner, int(task_duration))
+        if slot:
+            st.info(f"Next available slot: **{slot}**")
+        else:
+            st.warning("No open slots found (07:00–21:00).")
 with col_add:
     st.markdown("<br>", unsafe_allow_html=True)
     if st.button("Add Task", use_container_width=True):
@@ -108,6 +146,7 @@ with col_add:
             due_date=date.today(),
         )
         st.session_state.pets[selected_pet].add_task(new_task)
+        _save()
         st.success(f"Added '{task_title}' to {selected_pet}.")
 
 st.divider()
@@ -155,15 +194,19 @@ if display_tasks:
         status_icon = "✅" if task.completed else "⬜"
         time_label = task.scheduled_time if task.scheduled_time else "--:--"
         freq_label = f" | {task.frequency}" if task.frequency != "as_needed" else ""
+        cat_emoji = CATEGORY_EMOJI.get(task.category, "📋")
+        pri_dot = PRIORITY_INDICATOR.get(task.priority, "")
+        score = Scheduler.weighted_score(task)
 
         col_check, col_info, col_action = st.columns([0.5, 4, 1])
         with col_check:
             st.markdown(f"### {status_icon}")
         with col_info:
             st.markdown(
-                f"**{task.title}** ({pet_label})  \n"
+                f"{cat_emoji} **{task.title}** ({pet_label})  \n"
                 f"`{time_label}` · {task.duration_minutes} min · "
-                f"{task.priority} priority · {task.category}{freq_label}"
+                f"{pri_dot} {task.priority} · {task.category}{freq_label} · "
+                f"score {score:.1f}"
             )
         with col_action:
             if not task.completed:
@@ -171,6 +214,7 @@ if display_tasks:
                     pet_obj = st.session_state.pets.get(pet_label)
                     if pet_obj:
                         next_task = pet_obj.mark_task_complete(task.title)
+                        _save()
                         if next_task:
                             st.toast(f"Recurring: '{next_task.title}' created for {next_task.due_date}")
                         st.rerun()
@@ -185,6 +229,8 @@ st.divider()
 
 st.subheader("Generate Daily Schedule")
 
+use_weighted = st.toggle("Use weighted scoring", value=False, help="Rank by composite score instead of simple priority order")
+
 if st.button("Build Schedule", type="primary", use_container_width=True):
     # Conflict detection first
     conflicts = Scheduler.detect_conflicts(owner)
@@ -192,25 +238,31 @@ if st.button("Build Schedule", type="primary", use_container_width=True):
         for warning in conflicts:
             st.warning(f"⚠️ {warning}")
 
-    schedule = Scheduler.generate_schedule(owner)
+    if use_weighted:
+        schedule = Scheduler.generate_weighted_schedule(owner)
+    else:
+        schedule = Scheduler.generate_schedule(owner)
 
     if not schedule.tasks:
         st.info("No pending tasks to schedule.")
     else:
+        remaining = schedule.available_minutes - schedule.total_minutes
         st.success(
             f"Scheduled {len(schedule.tasks)} tasks · "
             f"{schedule.total_minutes} min used of {schedule.available_minutes} min available · "
-            f"{schedule.available_minutes - schedule.total_minutes} min free"
+            f"{remaining} min free"
         )
 
-        # Schedule table
+        # Schedule table with emojis and priority indicators
         table_data = []
         for i, task in enumerate(schedule.tasks, 1):
+            cat_emoji = CATEGORY_EMOJI.get(task.category, "📋")
+            pri_dot = PRIORITY_INDICATOR.get(task.priority, "")
             table_data.append({
                 "#": i,
-                "Task": task.title,
+                "Task": f"{cat_emoji} {task.title}",
                 "Duration": f"{task.duration_minutes} min",
-                "Priority": task.priority,
+                "Priority": f"{pri_dot} {task.priority}",
                 "Category": task.category,
                 "Time": task.scheduled_time or "--:--",
             })
@@ -222,5 +274,6 @@ if st.button("Build Schedule", type="primary", use_container_width=True):
         if skipped:
             with st.expander(f"Skipped tasks ({len(skipped)})"):
                 for t in skipped:
-                    st.markdown(f"- **{t.title}** — {t.duration_minutes} min, {t.priority} priority")
+                    pri = PRIORITY_INDICATOR.get(t.priority, "")
+                    st.markdown(f"- {pri} **{t.title}** — {t.duration_minutes} min, {t.priority} priority")
                 st.caption("These tasks didn't fit within the time budget.")
