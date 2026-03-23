@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from datetime import date, timedelta
+from pathlib import Path
+import json
 
 
 # ---------------------------------------------------------------------------
@@ -53,6 +55,34 @@ class Task:
             due_date=base + delta,
         )
 
+    def to_dict(self) -> dict:
+        """Serialise this task to a JSON-safe dictionary."""
+        return {
+            "title": self.title,
+            "duration_minutes": self.duration_minutes,
+            "priority": self.priority,
+            "category": self.category,
+            "frequency": self.frequency,
+            "completed": self.completed,
+            "scheduled_time": self.scheduled_time,
+            "due_date": self.due_date.isoformat() if self.due_date else None,
+        }
+
+    @classmethod
+    def from_dict(cls, data: dict) -> Task:
+        """Deserialise a Task from a dictionary."""
+        due = data.get("due_date")
+        return cls(
+            title=data["title"],
+            duration_minutes=data["duration_minutes"],
+            priority=data.get("priority", "medium"),
+            category=data.get("category", "general"),
+            frequency=data.get("frequency", "daily"),
+            completed=data.get("completed", False),
+            scheduled_time=data.get("scheduled_time", ""),
+            due_date=date.fromisoformat(due) if due else None,
+        )
+
 
 @dataclass
 class Pet:
@@ -89,6 +119,22 @@ class Pet:
                 return next_task
         return None
 
+    def to_dict(self) -> dict:
+        """Serialise this pet to a JSON-safe dictionary."""
+        return {
+            "name": self.name,
+            "species": self.species,
+            "age": self.age,
+            "tasks": [t.to_dict() for t in self.tasks],
+        }
+
+    @classmethod
+    def from_dict(cls, data: dict) -> Pet:
+        """Deserialise a Pet from a dictionary."""
+        pet = cls(name=data["name"], species=data.get("species", "dog"), age=data.get("age", 1))
+        pet.tasks = [Task.from_dict(t) for t in data.get("tasks", [])]
+        return pet
+
 
 @dataclass
 class Owner:
@@ -110,12 +156,57 @@ class Owner:
         """Gather only incomplete tasks across all pets."""
         return [task for pet in self.pets for task in pet.pending_tasks()]
 
+    def to_dict(self) -> dict:
+        """Serialise this owner to a JSON-safe dictionary."""
+        return {
+            "name": self.name,
+            "available_minutes": self.available_minutes,
+            "pets": [p.to_dict() for p in self.pets],
+        }
+
+    @classmethod
+    def from_dict(cls, data: dict) -> Owner:
+        """Deserialise an Owner from a dictionary."""
+        owner = cls(name=data["name"], available_minutes=data.get("available_minutes", 120))
+        owner.pets = [Pet.from_dict(p) for p in data.get("pets", [])]
+        return owner
+
+    def save_to_json(self, path: str | Path = "data.json") -> None:
+        """Persist owner, pets, and tasks to a JSON file."""
+        Path(path).write_text(json.dumps(self.to_dict(), indent=2), encoding="utf-8")
+
+    @classmethod
+    def load_from_json(cls, path: str | Path = "data.json") -> Owner | None:
+        """Load an Owner from a JSON file. Returns None if file doesn't exist."""
+        p = Path(path)
+        if not p.exists():
+            return None
+        data = json.loads(p.read_text(encoding="utf-8"))
+        return cls.from_dict(data)
+
 
 # ---------------------------------------------------------------------------
 # Scheduling
 # ---------------------------------------------------------------------------
 
 PRIORITY_ORDER = {"high": 0, "medium": 1, "low": 2}
+PRIORITY_WEIGHT = {"high": 3, "medium": 2, "low": 1}
+
+# Category emoji mapping for display
+CATEGORY_EMOJI = {
+    "walk": "🚶",
+    "feeding": "🍽️",
+    "meds": "💊",
+    "grooming": "✂️",
+    "enrichment": "🎾",
+    "general": "📋",
+}
+
+PRIORITY_INDICATOR = {
+    "high": "🔴",
+    "medium": "🟡",
+    "low": "🟢",
+}
 
 
 @dataclass
@@ -237,6 +328,70 @@ class Scheduler:
                     f"Conflict at {time_slot}: {names}"
                 )
         return warnings
+
+    # -- Advanced: next available slot -----------------------------------------
+
+    @staticmethod
+    def find_next_slot(
+        owner: Owner, duration_minutes: int, start_hour: int = 7, end_hour: int = 21,
+    ) -> str:
+        """Find the next available time slot that doesn't conflict with existing tasks.
+
+        Scans from start_hour to end_hour in 15-minute increments and returns
+        the first HH:MM slot where no pending task is scheduled. This is a
+        simple "first-fit" approach — it doesn't account for task durations
+        overlapping, only exact start-time collisions.
+
+        Returns "" if no slot is available.
+        """
+        occupied: set[str] = set()
+        for pet in owner.pets:
+            for task in pet.pending_tasks():
+                if task.scheduled_time:
+                    occupied.add(task.scheduled_time)
+
+        for hour in range(start_hour, end_hour):
+            for minute in (0, 15, 30, 45):
+                slot = f"{hour:02d}:{minute:02d}"
+                if slot not in occupied:
+                    return slot
+        return ""
+
+    # -- Advanced: weighted priority scoring -----------------------------------
+
+    @staticmethod
+    def weighted_score(task: Task) -> float:
+        """Compute a weighted priority score for ranking tasks.
+
+        Score = priority_weight * (duration_factor + recurrence_bonus).
+        Higher score = more important to schedule.
+        """
+        weight = PRIORITY_WEIGHT.get(task.priority, 1)
+        # Shorter tasks get a slight bonus (efficiency factor)
+        duration_factor = max(1, 60 - task.duration_minutes) / 60
+        # Recurring tasks get a bonus since skipping them has compounding effects
+        recurrence_bonus = 0.2 if task.frequency != "as_needed" else 0
+        return weight * (duration_factor + recurrence_bonus)
+
+    @staticmethod
+    def generate_weighted_schedule(owner: Owner) -> Schedule:
+        """Build a schedule using weighted scoring instead of simple priority order.
+
+        Tasks are ranked by weighted_score (descending) and greedily fitted
+        into the time budget. This produces subtly different results from
+        generate_schedule when recurring short tasks compete with one-off long
+        tasks.
+        """
+        pending = owner.get_pending_tasks()
+        ranked = sorted(pending, key=Scheduler.weighted_score, reverse=True)
+        selected = Scheduler._fit_to_time(ranked, owner.available_minutes)
+        total = sum(t.duration_minutes for t in selected)
+
+        return Schedule(
+            tasks=selected,
+            total_minutes=total,
+            available_minutes=owner.available_minutes,
+        )
 
     # -- Private helpers -------------------------------------------------------
 
